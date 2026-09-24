@@ -1,0 +1,29 @@
+services:
+  api:
+    build: ./api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - f1data:/data
+      # persist the one-time F1TV auth token for live timing (optional)
+      - f1auth:/root/.local/share/fastf1
+    environment:
+      - F1_DATA_DIR=/data
+      - F1_SEASON=${F1_SEASON:-2026}
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      args:
+        # URL the BROWSER uses to reach the API — change if not on localhost
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  f1data:
+  f1auth:

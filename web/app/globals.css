@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #f6f2ea;
+  --card: #fffdf8;
+  --ink: #191511;
+  --ink-soft: #2e2822;
+  --red: #e10600;
+  --red-deep: #a50400;
+  --line: #e3dbcd;
+  --muted: #86796a;
+  --tyre-soft: #e10600;
+  --tyre-medium: #ffb800;
+  --tyre-hard: #191511;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-red: var(--red);
+  --color-red-deep: var(--red-deep);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --font-display: var(--font-saira), sans-serif;
+  --font-sans: var(--font-archivo), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+/* faint engineering-grid paper texture */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(25, 21, 17, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(25, 21, 17, 0.025) 1px, transparent 1px);
+  background-size: 36px 36px;
+  z-index: 0;
+}
+
+::selection {
+  background: var(--red);
+  color: #fff;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* ------------------------------------------------ display type helpers */
+
+.display {
+  font-family: var(--font-display);
+  font-style: italic;
+  letter-spacing: -0.01em;
+}
+
+/* ------------------------------------------------ signature: pit board */
+
+.pit-board {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--ink);
+  color: #fff;
+  transform: skewX(-8deg);
+  box-shadow: 4px 4px 0 var(--red);
+}
+.pit-board > * {
+  transform: skewX(8deg);
+}
+
+/* ------------------------------------------------ checkered strip */
+
+.checkers {
+  --sq: 10px;
+  height: calc(var(--sq) * 2);
+  background:
+    conic-gradient(var(--ink) 90deg, transparent 90deg 180deg, var(--ink) 180deg 270deg, transparent 270deg);
+  background-size: calc(var(--sq) * 2) calc(var(--sq) * 2);
+  opacity: 0.9;
+}
+
+/* ------------------------------------------------ broadcast ticker */
+
+@keyframes ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.ticker-track {
+  display: flex;
+  width: max-content;
+  animation: ticker 45s linear infinite;
+}
+.ticker-track:hover {
+  animation-play-state: paused;
+}
+
+/* ------------------------------------------------ skeleton / misc */
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #ede7db 25%, #f6f2ea 50%, #ede7db 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 2px;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.live-dot { animation: pulseDot 1.2s infinite; }
+
+/* speed lines behind hero headline */
+.speed-lines {
+  background: repeating-linear-gradient(
+    -12deg,
+    transparent 0 34px,
+    rgba(225, 6, 0, 0.06) 34px 38px,
+    transparent 38px 90px,
+    rgba(25, 21, 17, 0.05) 90px 93px
+  );
+}
+
+/* hard-edged racing card */
+.race-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 0 rgba(25, 21, 17, 0.04);
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s;
+}
+.race-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 6px 6px 0 rgba(25, 21, 17, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; }
+  .race-card, .race-card:hover { transform: none; transition: none; }
+}

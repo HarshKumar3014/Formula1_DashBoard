@@ -1,0 +1,4 @@
+# Populated by push.sh from the source tree — never committed to the source repo.
+app/
+seed/
+requirements.txt
