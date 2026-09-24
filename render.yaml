@@ -1,0 +1,16 @@
+# Render blueprint — API only. The web front end lives on Vercel (see README).
+services:
+  - type: web
+    name: pit-wall-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: F1_DATA_DIR
+        value: /data
+      - key: F1_SEASON
+        value: "2026"

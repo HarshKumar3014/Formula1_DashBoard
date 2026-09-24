@@ -1,6 +1,8 @@
 services:
   api:
-    build: ./api
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:

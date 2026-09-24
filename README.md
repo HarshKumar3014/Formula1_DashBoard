@@ -104,33 +104,35 @@ APScheduler: news 15min · standings post-race · schedule daily · backfill wee
 claude --resume 7a229b2b-49ae-4072-b254-c014e31a345a
 ## Free public hosting
 
-Web on Vercel, API as a Docker Space on Hugging Face — both free tiers, no card.
+Web on Vercel, API on Render — both free tiers, neither needs a credit card.
 
-### 1. API → Hugging Face Space
+### 1. API → Render
 
-```bash
-hf auth login                                   # write token from hf.co/settings/tokens
-# create the Space at https://huggingface.co/new-space → SDK "Docker", blank template
-./deploy/space/push.sh <hf-user>/pit-wall-api   # assembles + pushes; first build ~5 min
-curl https://<hf-user>-pit-wall-api.hf.space/api/health
-```
+The repo carries `render.yaml`, so Render configures itself:
 
-`deploy/space/` holds only the Space wrapper (Dockerfile on port 7860, entrypoint, README
-front matter). `push.sh` stages a copy of `api/app`, `api/requirements.txt` and
-`data/jsoncache` in `~/.cache/pitwall-space` and force-pushes that — so the Space is always
-a build artifact of this repo, never a second source of truth. Re-run it after any API change.
+1. [dashboard.render.com](https://dashboard.render.com) → **New → Blueprint** → connect this repo.
+2. Apply. It builds `api/Dockerfile` with the repo root as context and deploys `pit-wall-api`.
+3. Check it: `curl https://pit-wall-api.onrender.com/api/health`
 
-Free-tier facts: 2 vCPU / 16 GB RAM, sleeps after ~48 h idle (next request cold-starts it),
-and **no persistent disk** — every restart begins from the seeded JSON caches and rebuilds the
-Fast-F1 cache from the network on demand. Live timing still needs the one-time F1TV auth, which
-a free Space cannot keep, so it runs in replay mode.
+Pushes to `main` redeploy automatically. Free plan = 512 MB RAM, 0.1 CPU, 750 instance-hours
+per month, **no persistent disk**, and it **sleeps after 15 minutes idle** (next request cold-starts
+it, ~1 minute). Consequences worth knowing:
+
+- The image bakes in `data/jsoncache`, so a cold container serves standings, schedule, news,
+  records, circuits and the stored replay/telemetry bundles immediately.
+- The Fast-F1 cache starts empty each boot and refills from the network on demand. Parsing an
+  uncached session is the one thing that can brush the 512 MB ceiling; if it does, Render
+  restarts the service — nothing is lost but the cache.
+- APScheduler jobs only run while the service is awake, so news/standings refresh on visits
+  rather than on the clock.
+- Live timing needs the one-time F1TV auth, which cannot persist here — it stays in replay mode.
 
 ### 2. Web → Vercel
 
 Import the repo at [vercel.com/new](https://vercel.com/new), then:
 
 - **Root Directory**: `web`
-- **Environment Variable**: `NEXT_PUBLIC_API_URL` = `https://<hf-user>-pit-wall-api.hf.space`
+- **Environment Variable**: `NEXT_PUBLIC_API_URL` = `https://pit-wall-api.onrender.com`
 
-The browser talks to the API directly (CORS is `*`, WebSocket upgrades to `wss://`), so the
+The browser talks to the API directly (CORS is `*`, WebSocket upgrades to `wss://`), so that one
 variable is all that ties the two halves together. Pushes to `main` redeploy automatically.
