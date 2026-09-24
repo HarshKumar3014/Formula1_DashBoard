@@ -1,8 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8020";
+// Trailing slashes would produce `//api/...`, which FastAPI 404s on.
+export const API_BASE = (
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8020"
+).replace(/\/+$/, "");
 
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
