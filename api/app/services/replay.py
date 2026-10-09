@@ -2,7 +2,7 @@
 
 Produces a compact JSON bundle (track outline, 1 Hz car positions, per-lap
 leaderboard, derived commentary events) that the frontend animates. Built once
-per session and cached to disk — replay must always work, live is additive.
+per session and cached to disk.
 """
 import logging
 import math

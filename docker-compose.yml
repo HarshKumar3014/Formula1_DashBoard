@@ -6,9 +6,7 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
-      - f1data:/data
-      # persist the one-time F1TV auth token for live timing (optional)
-      - f1auth:/root/.local/share/fastf1
+      - f1data:/data  # caches + predictions.db (SQLite) persist here
     environment:
       - F1_DATA_DIR=/data
       - F1_SEASON=${F1_SEASON:-2026}
@@ -28,4 +26,3 @@ services:
 
 volumes:
   f1data:
-  f1auth:

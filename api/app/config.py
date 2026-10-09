@@ -2,11 +2,36 @@
 import os
 from pathlib import Path
 
+
+def _load_dotenv(path: Path) -> None:
+    """Minimal KEY=VALUE loader for local dev (api/.env); real env vars always win."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 # Data directory (mounted as a Docker volume in production)
 DATA_DIR = Path(os.environ.get("F1_DATA_DIR", str(Path(__file__).resolve().parents[2] / "data")))
 FF1_CACHE_DIR = DATA_DIR / "ff1cache"
 JSON_CACHE_DIR = DATA_DIR / "jsoncache"
 DB_PATH = DATA_DIR / "f1.db"
+
+# Prediction game storage. Defaults to SQLite in the data dir; set DATABASE_URL to a
+# Postgres URL on hosts without a persistent disk (e.g. Render free), or every
+# restart wipes the players and their picks.
+DATABASE_URL = os.environ.get("DATABASE_URL") or f"sqlite:///{DATA_DIR / 'predictions.db'}"
+
+# Supabase Auth — the API only verifies the access tokens the browser gets from Supabase.
+# Tokens signed with the project's asymmetric keys are checked against its public JWKS;
+# legacy HS256 projects (or local tests) can set SUPABASE_JWT_SECRET instead.
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 
 # Current season; override via env if needed
 SEASON = int(os.environ.get("F1_SEASON", "2026"))

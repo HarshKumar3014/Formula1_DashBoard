@@ -11,7 +11,9 @@ the [Jolpica-F1 API](https://github.com/jolpica/jolpica-f1) (Ergast successor) a
 |---|---|
 | **Home** | Greeting + countdown to the next session, top F1 news, Ferrari & Mercedes news columns, current grid by team, driver + constructor standings |
 | **Telemetry** | Fastest-lap comparison for up to 4 drivers (Speed / Throttle / Brake / Gear / RPM / DRS over distance) + speed-colored track map. Data from 2018 onwards |
-| **Live** | Replay of the last completed session (animated track map, timing tower, derived commentary: overtakes, pits, fastest laps, flags). True live timing during sessions (requires F1TV auth, see below) |
+| **Results** | Every round of the season, every session — FP1–3, Sprint Quali, Sprint, Qualifying, Race. Race/sprint: grid delta, laps, gaps, points, fastest lap. Quali: Q1/Q2/Q3. Practice: best lap, gap, laps |
+| **Predict** | Prediction game: call the top 10 for each session of the next weekend, picks lock at the session start, auto-scored when results land, season + per-round leaderboard, career-tier ladder and badges |
+| **Replay** | Animated simulation of any completed session (track map, timing tower, derived commentary: overtakes, pits, fastest laps, flags). Defaults to the latest session |
 | **Circuits** | Every circuit of the current calendar with last winner, fastest lap ever + who, most wins + who, most poles + who (aggregated from 1950-present) |
 | **Records** | All-time records: wins, poles, podiums, fastest laps, titles, constructor titles, youngest/oldest winners |
 
@@ -35,6 +37,9 @@ Jolpica). Circuits/Records pages show a friendly notice until it finishes.
 | `API_PORT` | `8000` | Host port for the API |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | URL the **browser** uses to reach the API. Set to `http://<your-host>:8000` when accessing from other devices (build arg — rebuild web after changing) |
 | `F1_SEASON` | `2026` | Current season |
+| `DATABASE_URL` | SQLite in `data/predictions.db` | Prediction-game storage. Any Postgres URL works (`postgres://…`) |
+| `SUPABASE_URL` | — | API: Supabase project URL, used to verify sign-in tokens |
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | — | Web: Supabase project URL + publishable key for the sign-in buttons |
 
 Example: `WEB_PORT=3100 API_PORT=8100 NEXT_PUBLIC_API_URL=http://localhost:8100 docker compose up --build`
 
@@ -58,31 +63,31 @@ Run the historical backfill manually (also runs automatically on first boot / we
 cd api && F1_DATA_DIR=$(pwd)/../data .venv/bin/python -m app.aggregation.backfill
 ```
 
-## Live timing (optional, needs F1TV subscription)
+## Prediction game
 
-F1's live timing stream requires authentication since 2025. One-time setup:
-
-```bash
-cd api && .venv/bin/python -m fastf1 auth
-# opens a browser — log in with your Formula1/F1TV account
-```
-
-The token is stored in fastf1's user data dir (persisted in the `f1auth` Docker volume).
-Without it, the Live page automatically falls back to replay mode — which always works.
+Sign-in is **Supabase Auth** (Google + GitHub). The browser gets a session from Supabase and
+sends its access token to the API, which verifies the JWT against the project's public JWKS
+(`SUPABASE_URL`) — the API holds no auth secrets. On first sign-in a player picks the racing name
+shown on the leaderboard. Browsing results and leaderboards needs no account. Scoring per session: **+5** exact position, **+3** one place off, **+1** in the top 10,
+**+5** perfect podium bonus, **+25** all ten exact (max 80). Practice is ranked by best lap,
+qualifying by classification, sprint/race by finishing order. A scheduler job (every 20 min)
+builds results for finished sessions and scores pending picks; the leaderboard also scores
+lazily from cached results on each request.
 
 ## Architecture
 
 ```
 Next.js (Tailwind + Recharts + SVG track maps)
-   │  REST + WebSocket
+   │  REST
 FastAPI
    ├─ fastf1            → session telemetry, schedule, replay position data (cached on disk)
    ├─ fastf1.ergast     → Jolpica: standings, grid (cached JSON, cron-refreshed after races)
    ├─ raw Jolpica       → historical backfill → SQLite aggregates (circuits, records)
    ├─ feedparser        → RSS news, 15-min cache, per-team keyword filters
-   └─ SignalRClient     → live timing → in-memory state → WS snapshots (2 Hz)
+   ├─ fastf1 sessions   → per-session results (cached JSON forever)
+   └─ SQLAlchemy        → prediction game (SQLite locally, Postgres when hosted)
 APScheduler: news 15min · standings post-race · schedule daily · backfill weekly ·
-             replay warm post-race · live watchdog every 2min
+             replay warm post-race · results + prediction scoring every 20min
 ```
 
 ### Design rules
@@ -90,8 +95,8 @@ APScheduler: news 15min · standings post-race · schedule daily · backfill wee
 - **Nothing historical is fetched on the request path** — precomputed into SQLite/JSON by
   background jobs. Jolpica is volunteer-hosted; the full backfill costs ~100 requests total
   by using filtered endpoints (`results/1`, `grid/1/results`, `fastest/1/results`, …).
-- **Replay must always work; live is additive** and degrades gracefully (no auth / no
-  session / stream break → replay).
+- **Replay only, no live timing**: F1's live stream needs a paid F1TV login, so sessions are
+  shown as replays once they finish.
 - **Missing data is surfaced, not crashed on**: telemetry pre-2018, fastest laps pre-2004,
   poles counted as grid P1 (pre-1994 qualifying data doesn't exist).
 
@@ -125,14 +130,22 @@ it, ~1 minute). Consequences worth knowing:
   restarts the service — nothing is lost but the cache.
 - APScheduler jobs only run while the service is awake, so news/standings refresh on visits
   rather than on the clock.
-- Live timing needs the one-time F1TV auth, which cannot persist here — it stays in replay mode.
+- **The prediction game needs a real database here.** Without `DATABASE_URL` it falls back to
+  SQLite on the container's disk, which is wiped on every sleep/redeploy. Set `DATABASE_URL` to the
+  Supabase **Session pooler** connection string (Supabase → Connect) and `SUPABASE_URL` to the
+  project URL on the Render service.
+- Results for past sessions are baked in from `data/jsoncache`; replays of sessions that aren't
+  baked in are built on demand and are the heaviest request (512 MB risk).
 
 ### 2. Web → Vercel
 
 Import the repo at [vercel.com/new](https://vercel.com/new), then:
 
 - **Root Directory**: `web`
-- **Environment Variable**: `NEXT_PUBLIC_API_URL` = `https://pit-wall-api.onrender.com`
+- **Environment Variables**: `NEXT_PUBLIC_API_URL` = `https://pit-wall-api.onrender.com`,
+  plus `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- In Supabase → Authentication → URL Configuration, add the Vercel URL as **Site URL** and
+  `https://<your-app>.vercel.app/**` under **Redirect URLs**
 
-The browser talks to the API directly (CORS is `*`, WebSocket upgrades to `wss://`), so that one
+The browser talks to the API directly (CORS is `*`), so that one
 variable is all that ties the two halves together. Pushes to `main` redeploy automatically.

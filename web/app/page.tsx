@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { motion } from "motion/react";
 import { useApi } from "@/lib/api";
 import Countdown from "@/components/Countdown";
@@ -119,7 +120,7 @@ export default function Home() {
                 {next?.live ? (
                   <p className="flex items-center gap-2 text-lg font-bold text-red">
                     <span className="live-dot h-3 w-3 rounded-full bg-red" />
-                    {next.live.session} live now — {next.live.event}
+                    {next.live.session} on now — {next.live.event}
                   </p>
                 ) : next?.next ? (
                   <p className="text-sm font-medium text-ink-soft">
@@ -129,6 +130,14 @@ export default function Home() {
                   </p>
                 ) : (
                   <p className="text-sm text-muted">Season complete — see you next year.</p>
+                )}
+                {(next?.next || next?.live) && (
+                  <Link
+                    href="/predict"
+                    className="pit-board mt-4 px-3 py-1.5 text-xs font-bold uppercase text-white transition-transform hover:scale-105"
+                  >
+                    <span>Predict the top 10 →</span>
+                  </Link>
                 )}
               </motion.div>
             </div>

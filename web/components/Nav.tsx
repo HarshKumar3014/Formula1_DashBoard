@@ -2,22 +2,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
-import { useApi } from "@/lib/api";
 
 const LINKS = [
   { href: "/", label: "Home" },
+  { href: "/results", label: "Results" },
+  { href: "/predict", label: "Predict" },
+  { href: "/replay", label: "Replay" },
   { href: "/telemetry", label: "Telemetry" },
-  { href: "/live", label: "Live" },
   { href: "/circuits", label: "Circuits" },
   { href: "/records", label: "Records" },
 ];
 
-type LiveStatus = { mode: string; liveSession: { session: string; event: string } | null };
-
 export default function Nav() {
   const pathname = usePathname();
-  const { data: status } = useApi<LiveStatus>("/api/live/status", 60_000);
-  const live = status?.liveSession;
 
   return (
     <header className="sticky top-0 z-30 border-b-2 border-ink bg-paper/90 backdrop-blur">
@@ -35,14 +32,11 @@ export default function Nav() {
               <Link
                 key={l.href}
                 href={l.href}
-                className={`relative px-3 py-2 text-sm font-bold uppercase tracking-wide transition-colors ${
+                className={`relative shrink-0 px-3 py-2 text-sm font-bold uppercase tracking-wide transition-colors ${
                   active ? "text-ink" : "text-muted hover:text-ink"
                 }`}
               >
                 {l.label}
-                {l.href === "/live" && live && (
-                  <span className="live-dot ml-1.5 inline-block h-2 w-2 rounded-full bg-red align-middle" />
-                )}
                 {active && (
                   <motion.span
                     layoutId="nav-underline"
@@ -53,15 +47,6 @@ export default function Nav() {
             );
           })}
         </div>
-        {live && (
-          <Link
-            href="/live"
-            className="hidden items-center gap-2 bg-ink px-3 py-1.5 font-mono text-[11px] font-bold uppercase text-white md:flex"
-          >
-            <span className="live-dot h-2 w-2 rounded-full bg-red" />
-            Live · {live.session}
-          </Link>
-        )}
       </nav>
     </header>
   );

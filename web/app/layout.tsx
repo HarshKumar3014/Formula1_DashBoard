@@ -22,7 +22,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Pit Wall — F1 Dashboard",
   description:
-    "Personal Formula 1 dashboard: standings, news, telemetry, live sessions, circuits and records.",
+    "Personal Formula 1 dashboard: results, predictions, standings, news, telemetry, session replays, circuits and records.",
 };
 
 export default function RootLayout({

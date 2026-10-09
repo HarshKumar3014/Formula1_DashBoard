@@ -14,3 +14,10 @@ services:
         value: /data
       - key: F1_SEASON
         value: "2026"
+      # Supabase Postgres (Session pooler) connection string for the prediction game.
+      # Set it in the Render dashboard; without it picks live on the ephemeral disk.
+      - key: DATABASE_URL
+        sync: false
+      # Supabase project URL — the API verifies sign-in tokens against its public keys
+      - key: SUPABASE_URL
+        sync: false

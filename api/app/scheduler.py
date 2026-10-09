@@ -41,20 +41,11 @@ def _warm_replay():
         log.info("replay warmed: %s", target)
 
 
-def _live_watchdog():
-    """Start the live timing client shortly before/during a live session."""
-    from .services import live, schedule
-    info = schedule.get_next_session()
-    now = datetime.now(timezone.utc)
-    should_run = False
-    if info.get("live"):
-        should_run = True
-    elif info.get("next"):
-        start = datetime.fromisoformat(info["next"]["dateUtc"])
-        # start recording 3 minutes before the session
-        should_run = 0 < (start - now).total_seconds() < 180
-    if should_run and not live.manager.running:
-        live.manager.start()
+def _warm_results():
+    """Build results for sessions that finished since the last run, then score picks."""
+    from .services import predict, results
+    results.warm_completed()
+    predict.score_pending(build=True)
 
 
 def create_scheduler() -> BackgroundScheduler:
@@ -66,5 +57,7 @@ def create_scheduler() -> BackgroundScheduler:
     sched.add_job(_refresh_schedule, "cron", hour=5)
     sched.add_job(_weekly_backfill, "cron", day_of_week="mon", hour=4)
     sched.add_job(_warm_replay, "cron", day_of_week="sun,mon", hour=22)
-    sched.add_job(_live_watchdog, "interval", minutes=2)
+    # results + prediction scoring: every 20 min (cheap no-op when nothing new finished)
+    sched.add_job(_warm_results, "interval", minutes=20, jitter=60,
+                  next_run_time=datetime.now(timezone.utc))
     return sched
