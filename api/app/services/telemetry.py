@@ -1,6 +1,7 @@
 """Session telemetry: per-driver fastest-lap traces + speed-colored track map.
 
-Session data is immutable once complete → cached to disk forever.
+Session data is immutable once complete → one all-drivers bundle per session, cached
+forever (and published to the storage CDN by app.publish).
 Telemetry only exists from 2018 onwards (surfaced to the UI via /options).
 """
 import logging
@@ -30,6 +31,36 @@ def _downsample(df: pd.DataFrame, n: int = 600) -> pd.DataFrame:
         return df
     idx = np.linspace(0, len(df) - 1, n).astype(int)
     return df.iloc[idx]
+
+
+def fastest_with_telemetry(laps, tries: int = 5):
+    """(lap, telemetry) for the quickest lap whose car data actually loads.
+
+    fastf1 occasionally can't slice telemetry for a lap (gaps in the feed → "None of
+    ['Date'] are in the columns"), so fall back to the next-quickest laps.
+    """
+    timed = laps[laps["LapTime"].notna()].sort_values("LapTime")
+    for i in range(min(tries, len(timed))):
+        lap = timed.iloc[i]  # .iloc keeps fastf1's Lap type (iterrows would drop the session)
+        try:
+            return lap, lap.get_telemetry()
+        except (KeyError, ValueError):
+            continue
+    return None, None
+
+
+def car_data_only(laps):
+    """(lap, car data + distance) for the fastest lap when position data is missing
+    (e.g. 2026 Monaco race) — every channel but the X/Y car path."""
+    timed = laps[laps["LapTime"].notna()].sort_values("LapTime")
+    if not len(timed):
+        return None, None
+    lap = timed.iloc[0]
+    try:
+        tel = lap.get_car_data().add_distance()
+    except (KeyError, ValueError):
+        return None, None
+    return (lap, tel) if len(tel) else (None, None)
 
 
 def get_options(season: int = SEASON) -> dict:
@@ -69,64 +100,79 @@ def get_session_drivers(year: int, round_: int, ses: str) -> dict:
     return jsoncache.get_or_build(f"drivers_{year}_{round_}_{ses}", None, build)
 
 
+def build_session_bundle(year: int, round_: int, ses: str) -> dict:
+    """Fastest-lap traces for every driver in a session, so any comparison is instant."""
+    session = fastf1.get_session(year, round_, ses)
+    session.load(telemetry=True, weather=False, messages=False)
+    try:
+        rotation = session.get_circuit_info().rotation
+    except (AttributeError, ValueError, KeyError):  # no MultiViewer map / unusable fastest lap
+        rotation = 0.0
+    drivers, traces = [], []
+    for _, row in session.results.iterrows():
+        code = row.get("Abbreviation")
+        color = (f"#{row.get('TeamColor')}" if row.get("TeamColor")
+                 else team_color(None, row.get("TeamName")))
+        drivers.append({
+            "code": code, "number": str(row.get("DriverNumber")), "name": row.get("FullName"),
+            "team": row.get("TeamName"), "teamColor": color,
+            "position": None if pd.isna(row.get("Position")) else int(row.get("Position")),
+        })
+        driver_laps = session.laps.pick_drivers(code)
+        lap, tel = fastest_with_telemetry(driver_laps)
+        if lap is None:
+            lap, tel = car_data_only(driver_laps)
+        if lap is None:
+            continue
+        tel = _downsample(tel)
+        if "X" in tel.columns:
+            x, y = _rotate(tel["X"].to_numpy(), tel["Y"].to_numpy(), rotation)
+        else:
+            x, y = np.array([]), np.array([])
+        secs = tel["Time"].dt.total_seconds()
+        traces.append({
+            "code": code, "name": row.get("FullName"), "team": row.get("TeamName"),
+            "color": color,
+            "lapTime": f"{int(lap['LapTime'].total_seconds() // 60)}:"
+                       f"{lap['LapTime'].total_seconds() % 60:06.3f}",
+            "lapSeconds": round(lap["LapTime"].total_seconds(), 3),
+            "lapNumber": int(lap["LapNumber"]),
+            "compound": lap.get("Compound"),
+            "distance": [round(v, 1) for v in tel["Distance"].tolist()],
+            # seconds since lap start — enables client-side delta computation
+            "time": [round(v, 3) for v in (secs - secs.iloc[0]).tolist()],
+            "speed": tel["Speed"].fillna(0).astype(int).tolist(),
+            "throttle": tel["Throttle"].fillna(0).astype(int).tolist(),
+            "brake": tel["Brake"].astype(int).tolist(),
+            "gear": tel["nGear"].fillna(0).astype(int).tolist(),
+            "rpm": tel["RPM"].fillna(0).astype(int).tolist(),
+            "drs": [1 if v in (10, 12, 14) else 0 for v in tel["DRS"].fillna(0)],
+            # rotated car path, so the speed map can be drawn from any driver's lap
+            "x": [round(v) for v in x.tolist()],
+            "y": [round(v) for v in y.tolist()],
+        })
+    return {"year": year, "round": round_, "session": ses,
+            "event": session.event["EventName"], "drivers": drivers, "traces": traces}
+
+
+def get_session_bundle(year: int, round_: int, ses: str) -> dict:
+    if year < TELEMETRY_MIN_YEAR:
+        raise ValueError(f"Telemetry only exists from {TELEMETRY_MIN_YEAR} onwards.")
+    return jsoncache.get_or_build(f"telemetry_{year}_{round_}_{ses}", None,
+                                  lambda: build_session_bundle(year, round_, ses))
+
+
 def get_telemetry(year: int, round_: int, ses: str, codes: list[str]) -> dict:
+    """Comparison for up to 4 drivers, cut from the session bundle."""
     if year < TELEMETRY_MIN_YEAR:
         return {"error": f"Telemetry only exists from {TELEMETRY_MIN_YEAR} onwards.",
                 "year": year}
     codes = sorted(set(codes))[:4]
-
-    def build():
-        session = fastf1.get_session(year, round_, ses)
-        session.load(telemetry=True, weather=False, messages=False)
-        drivers_meta = {d["code"]: d for d in
-                        get_session_drivers(year, round_, ses)["drivers"]}
-        out_drivers = []
-        fastest_overall = None
-        for code in codes:
-            laps = session.laps.pick_drivers(code)
-            if not len(laps):
-                continue
-            lap = laps.pick_fastest()
-            if lap is None or pd.isna(lap["LapTime"]):
-                continue
-            tel = _downsample(lap.get_telemetry())
-            meta = drivers_meta.get(code, {})
-            out_drivers.append({
-                "code": code,
-                "name": meta.get("name", code),
-                "team": meta.get("team"),
-                "color": meta.get("teamColor", "#9CA3AF"),
-                "lapTime": f"{int(lap['LapTime'].total_seconds() // 60)}:"
-                           f"{lap['LapTime'].total_seconds() % 60:06.3f}",
-                "lapNumber": int(lap["LapNumber"]),
-                "compound": lap.get("Compound"),
-                "distance": [round(v, 1) for v in tel["Distance"].tolist()],
-                # seconds since lap start — enables client-side delta computation
-                "time": [round(v, 3) for v in
-                         (tel["Time"].dt.total_seconds() - tel["Time"].dt.total_seconds().iloc[0]).tolist()],
-                "speed": tel["Speed"].fillna(0).astype(int).tolist(),
-                "throttle": tel["Throttle"].fillna(0).astype(int).tolist(),
-                "brake": tel["Brake"].astype(int).tolist(),
-                "gear": tel["nGear"].fillna(0).astype(int).tolist(),
-                "rpm": tel["RPM"].fillna(0).astype(int).tolist(),
-                "drs": [1 if v in (10, 12, 14) else 0 for v in tel["DRS"].fillna(0)],
-            })
-            if fastest_overall is None or lap["LapTime"] < fastest_overall["LapTime"]:
-                fastest_overall = lap
-
-        track = None
-        if fastest_overall is not None:
-            tel = _downsample(fastest_overall.get_telemetry(), 800)
-            rotation = session.get_circuit_info().rotation
-            x, y = _rotate(tel["X"].to_numpy(), tel["Y"].to_numpy(), rotation)
-            track = {"x": [round(v, 0) for v in x.tolist()],
-                     "y": [round(v, 0) for v in y.tolist()],
-                     "distance": [round(v, 1) for v in tel["Distance"].tolist()],
-                     "speed": tel["Speed"].fillna(0).astype(int).tolist()}
-
-        return {"year": year, "round": round_, "session": ses,
-                "event": session.event["EventName"],
-                "drivers": out_drivers, "track": track}
-
-    key = f"telemetry_{year}_{round_}_{ses}_{'-'.join(codes)}"
-    return jsoncache.get_or_build(key, None, build)
+    bundle = get_session_bundle(year, round_, ses)
+    picked = [t for t in bundle["traces"] if t["code"] in codes]
+    fastest = min(picked, key=lambda t: t["lapSeconds"], default=None)
+    track = ({"x": fastest["x"], "y": fastest["y"], "distance": fastest["distance"],
+              "speed": fastest["speed"]} if fastest else None)
+    return {"year": year, "round": round_, "session": ses, "event": bundle["event"],
+            "drivers": [{k: v for k, v in t.items() if k not in ("x", "y")} for t in picked],
+            "track": track}

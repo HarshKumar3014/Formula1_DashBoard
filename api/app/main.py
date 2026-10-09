@@ -119,6 +119,16 @@ async def telemetry_drivers(year: int, round_: int, ses: str):
         raise HTTPException(422, f"Could not load session: {exc}")
 
 
+@app.get("/api/telemetry/{year}/{round_}/{ses}/bundle")
+async def telemetry_bundle(year: int, round_: int, ses: str):
+    """Every driver's fastest-lap trace for a session (what the telemetry page loads)."""
+    from .services import telemetry as svc
+    try:
+        return await run_in_threadpool(svc.get_session_bundle, year, round_, ses.upper())
+    except Exception as exc:
+        raise HTTPException(422, f"Could not load telemetry: {exc}")
+
+
 @app.get("/api/telemetry/{year}/{round_}/{ses}")
 async def telemetry(year: int, round_: int, ses: str,
                     drivers: str = Query(..., description="comma-separated codes, e.g. VER,LEC")):
@@ -163,28 +173,35 @@ async def replay_bundle(round_: int | None = Query(default=None, alias="round"),
         target = await run_in_threadpool(svc.find_last_completed)
         if not target:
             raise HTTPException(404, "No completed session found for this season yet.")
-        round_, name = target["round"], target["session"]
+        round_, code = target["round"], target["session"]
     else:
-        name = res_svc.CODE_NAMES.get(session.upper(), session)
+        code = session.upper()
+        if code not in res_svc.KIND:  # accept full names too ("Race")
+            code = res_svc.SESSION_CODES.get(session, code)
     try:
-        return await run_in_threadpool(svc.get_replay, config.SEASON, round_, name)
+        return await run_in_threadpool(svc.get_replay, config.SEASON, round_, code)
     except Exception as exc:
         raise HTTPException(500, f"Replay build failed: {exc}")
 
 
 # -------------------------------------------------------------- predictions
 
-def _auth_id(authorization: str | None, required: bool = True) -> str | None:
-    """Supabase user id from the bearer token; None for anonymous requests."""
+def _claims(authorization: str | None, required: bool = True) -> dict | None:
+    """Verified Supabase token claims; None for anonymous requests."""
     from . import auth
     if not authorization or not authorization.lower().startswith("bearer "):
         if required:
             raise HTTPException(401, "Sign in to play.")
         return None
     try:
-        return auth.verify(authorization[7:].strip())["sub"]
+        return auth.verify(authorization[7:].strip())
     except auth.AuthError as exc:
         raise HTTPException(401, str(exc))
+
+
+def _auth_id(authorization: str | None, required: bool = True) -> str | None:
+    claims = _claims(authorization, required)
+    return claims["sub"] if claims else None
 
 
 async def _player(authorization: str | None, required: bool = True):
@@ -210,6 +227,13 @@ class JoinBody(BaseModel):
 
 class PicksBody(BaseModel):
     picks: list[str]
+
+
+class ProfileBody(BaseModel):
+    newsTeams: list[str] = []
+    favDrivers: list[str] = []
+    favTeams: list[str] = []
+    favTrack: str | None = None
 
 
 @app.post("/api/predict/join")
@@ -248,3 +272,41 @@ async def predict_leaderboard(round_: int | None = Query(default=None, alias="ro
     from .services import predict
     player = await _player(authorization, required=False)
     return await _game(predict.leaderboard, round_, player)
+
+
+# ------------------------------------------------------------------ profiles
+
+@app.get("/api/teams")
+async def teams():
+    from .services import profile
+    return profile.teams()
+
+
+@app.get("/api/profile/options")
+async def profile_options():
+    from .services import profile
+    return await run_in_threadpool(profile.options)
+
+
+@app.get("/api/profile/me")
+async def profile_me(authorization: str | None = Header(default=None)):
+    """Own profile incl. private settings (news teams); refreshes the provider avatar."""
+    from .services import profile
+    claims = _claims(authorization)
+    player = await _player(authorization)
+    await run_in_threadpool(profile.sync_avatar, player, claims)
+    return await _game(profile.get_profile, player, True)
+
+
+@app.put("/api/profile/me")
+async def profile_update(body: ProfileBody, authorization: str | None = Header(default=None)):
+    from .services import profile
+    player = await _player(authorization)
+    return await _game(profile.update_profile, player, body.newsTeams, body.favDrivers,
+                       body.favTeams, body.favTrack)
+
+
+@app.get("/api/profile/{name}")
+async def profile_public(name: str):
+    from .services import profile
+    return await _game(profile.public_profile, name)

@@ -11,15 +11,12 @@ type Options = {
   maxYear: number;
   events: { round: number; name: string; country: string; sessions: string[] }[];
 };
-type SessionDrivers = {
+type Trace = DriverTrace & { lapNumber: number; lapSeconds: number; x: number[]; y: number[] };
+/** Every driver's fastest lap for one session — comparisons are cut from it client-side. */
+type Bundle = {
   event: string;
   drivers: { code: string; name: string; team: string; teamColor: string; position: number | null }[];
-};
-type TelemetryData = {
-  event: string;
-  drivers: DriverTrace[];
-  track: Track | null;
-  error?: string;
+  traces: Trace[];
 };
 
 const SESSION_LABELS: Record<string, string> = {
@@ -38,39 +35,45 @@ export default function TelemetryPage() {
   const [round, setRound] = useState<number | null>(null);
   const [ses, setSes] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [loadRequested, setLoadRequested] = useState(false);
   const [hoverDistance, setHoverDistance] = useState<number | null>(null);
   const [quickPick, setQuickPick] = useState(false);
 
   const { data: options } = useApi<Options>(`/api/telemetry/options?year=${year}`);
   const event = options?.events.find((e) => e.round === round) ?? null;
 
-  const { data: sessionDrivers, error: drvErr, loading: drvLoading } = useApi<SessionDrivers>(
-    round && ses ? `/api/telemetry/${year}/${round}/${ses}/drivers` : null,
+  const { data: bundle, error: drvErr, loading: drvLoading } = useApi<Bundle>(
+    round && ses ? `/api/telemetry/${year}/${round}/${ses}/bundle` : null,
   );
+  const sessionDrivers = bundle;
 
-  const telemetryPath = useMemo(() => {
-    if (!loadRequested || !round || !ses || selected.length === 0) return null;
-    return `/api/telemetry/${year}/${round}/${ses}?drivers=${selected.join(",")}`;
-  }, [loadRequested, year, round, ses, selected]);
-  const { data: tel, error: telErr, loading: telLoading } = useApi<TelemetryData>(telemetryPath);
+  // instant comparison: selected drivers' traces + the speed map from the fastest of them
+  const tel = useMemo(() => {
+    if (!bundle || selected.length === 0) return null;
+    const drivers = bundle.traces.filter((t) => selected.includes(t.code));
+    // some sessions lack position data for a lap → use the quickest trace that has a path
+    const withPath = (list: Trace[]) =>
+      [...list].filter((t) => t.x.length).sort((a, b) => a.lapSeconds - b.lapSeconds)[0];
+    const fastest = withPath(drivers) ?? withPath(bundle.traces);
+    const track: Track | null = fastest
+      ? { x: fastest.x, y: fastest.y, distance: fastest.distance, speed: fastest.speed }
+      : null;
+    return { event: bundle.event, drivers, track };
+  }, [bundle, selected]);
 
   useEffect(() => {
-    if (quickPick && sessionDrivers) {
-      const ordered = [...sessionDrivers.drivers]
+    if (quickPick && bundle) {
+      const ordered = [...bundle.drivers]
         .filter((d) => d.position != null)
         .sort((a, b) => (a.position ?? 99) - (b.position ?? 99));
       setSelected(ordered.slice(0, 2).map((d) => d.code));
-      setLoadRequested(true);
       setQuickPick(false);
     }
-  }, [quickPick, sessionDrivers]);
+  }, [quickPick, bundle]);
 
   const years = [];
   for (let y = currentYear; y >= 2018; y--) years.push(y);
 
   const toggleDriver = (code: string) => {
-    setLoadRequested(false);
     setSelected((s) =>
       s.includes(code) ? s.filter((c) => c !== code) : s.length < 4 ? [...s, code] : s,
     );
@@ -89,7 +92,6 @@ export default function TelemetryPage() {
                 setRound(last.round);
                 setSes("R");
                 setSelected([]);
-                setLoadRequested(false);
                 setQuickPick(true);
               }}
               className="pit-board px-3 py-1.5 text-xs font-bold uppercase text-white transition-transform hover:scale-105"
@@ -105,7 +107,6 @@ export default function TelemetryPage() {
                   setRound(null);
                   setSes(null);
                   setSelected([]);
-                  setLoadRequested(false);
                 }}
                 className="rounded-md border border-line bg-paper px-2 py-1.5"
               >
@@ -122,7 +123,6 @@ export default function TelemetryPage() {
                   setRound(+e.target.value || null);
                   setSes(null);
                   setSelected([]);
-                  setLoadRequested(false);
                 }}
                 className="max-w-56 rounded-md border border-line bg-paper px-2 py-1.5"
               >
@@ -142,7 +142,6 @@ export default function TelemetryPage() {
                     onClick={() => {
                       setSes(SESSION_LABELS[s] ?? s);
                       setSelected([]);
-                      setLoadRequested(false);
                     }}
                     className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
                       ses === (SESSION_LABELS[s] ?? s)
@@ -158,7 +157,15 @@ export default function TelemetryPage() {
           </div>
 
           {/* ------------------------------------------------ drivers */}
-          {drvLoading && <Skeleton className="h-16" />}
+          {drvLoading && (
+            <div className="space-y-2">
+              <Skeleton className="h-16" />
+              <p className="text-xs text-muted">
+                Loading every driver&apos;s fastest lap — instant for this season&apos;s sessions, up
+                to a minute the first time for older ones.
+              </p>
+            </div>
+          )}
           {drvErr && <ErrorNote message={drvErr} />}
           {sessionDrivers && (
             <div>
@@ -186,25 +193,11 @@ export default function TelemetryPage() {
                   );
                 })}
               </div>
-              <button
-                disabled={selected.length === 0 || telLoading}
-                onClick={() => setLoadRequested(true)}
-                className="mt-3 rounded-md bg-red px-4 py-2 text-sm font-bold text-white transition-opacity disabled:opacity-40"
-              >
-                {telLoading ? "Loading telemetry…" : "Load telemetry"}
-              </button>
-              {telLoading && (
-                <p className="mt-2 text-xs text-muted">
-                  First load of a session downloads full car data — can take a minute. Cached after.
-                </p>
-              )}
             </div>
           )}
         </Card>
       </Section>
 
-      {telErr && <ErrorNote message={telErr} />}
-      {tel?.error && <ErrorNote message={tel.error} />}
 
       {tel && tel.drivers.length > 0 && (
         <div className="fade-up grid gap-4 lg:grid-cols-5">
@@ -225,7 +218,7 @@ export default function TelemetryPage() {
                   <div className="flex-1">
                     <div className="font-semibold">{d.name}</div>
                     <div className="text-xs text-muted">
-                      lap {"lapNumber" in d ? (d as DriverTrace & { lapNumber?: number }).lapNumber : ""}
+                      lap {d.lapNumber}
                       {d.compound ? ` · ${d.compound}` : ""}
                     </div>
                   </div>

@@ -9,7 +9,9 @@ the [Jolpica-F1 API](https://github.com/jolpica/jolpica-f1) (Ergast successor) a
 
 | Page | What it shows |
 |---|---|
-| **Home** | Greeting + countdown to the next session, top F1 news, Ferrari & Mercedes news columns, current grid by team, driver + constructor standings |
+| **Login** | Google/GitHub sign-in, then a 3-step setup: racing name → news teams → favourites. The whole app sits behind it when Supabase is configured |
+| **Home** | Personal greeting + countdown to the next session, top F1 news, news columns for the teams you follow (or general only), current grid by team, driver + constructor standings |
+| **Profile** | Your racing card: tier, points, rank, badges, favourite drivers/teams/track, prediction history; edit news + favourites. Public view at `/u/<name>` (linked from the leaderboard) |
 | **Telemetry** | Fastest-lap comparison for up to 4 drivers (Speed / Throttle / Brake / Gear / RPM / DRS over distance) + speed-colored track map. Data from 2018 onwards |
 | **Results** | Every round of the season, every session — FP1–3, Sprint Quali, Sprint, Qualifying, Race. Race/sprint: grid delta, laps, gaps, points, fastest lap. Quali: Q1/Q2/Q3. Practice: best lap, gap, laps |
 | **Predict** | Prediction game: call the top 10 for each session of the next weekend, picks lock at the session start, auto-scored when results land, season + per-round leaderboard, career-tier ladder and badges |
@@ -73,6 +75,22 @@ shown on the leaderboard. Browsing results and leaderboards needs no account. Sc
 qualifying by classification, sprint/race by finishing order. A scheduler job (every 20 min)
 builds results for finished sessions and scores pending picks; the leaderboard also scores
 lazily from cached results on each request.
+
+## Data CDN (precomputed cache)
+
+Everything heavy is built ahead of time and served from a public **Supabase Storage** bucket
+(`pitwall/v1/<key>.json`, brotli-compressed by the CDN):
+
+- **What:** results, an all-driver telemetry bundle and a replay for every completed session of the
+  season, plus schedule, standings, grid, news, season index, circuits and records.
+- **Who builds it:** `python -m app.publish` (in `api/`), run hourly by GitHub Actions
+  (`.github/workflows/publish-data.yml`; repo secrets `SUPABASE_URL` + `SUPABASE_SECRET_KEY`).
+  Session artifacts are built once; small data is refreshed every run. Run it by hand with
+  `--rebuild 16/R` to redo a session.
+- **Who reads it:** the web app fetches published data straight from the CDN (instant, works while
+  the API sleeps) and falls back to the API. The API also pulls a published copy before ever
+  rebuilding with fastf1, so a fresh Render container never does the heavy work.
+- Older seasons' telemetry (2018–2025) still builds on demand through the API.
 
 ## Architecture
 

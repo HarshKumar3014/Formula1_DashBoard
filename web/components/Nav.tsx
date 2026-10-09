@@ -2,6 +2,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
+import { useAuth } from "@/lib/auth";
+import Avatar from "@/components/Avatar";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -15,6 +17,8 @@ const LINKS = [
 
 export default function Nav() {
   const pathname = usePathname();
+  const { player, profile } = useAuth();
+  if (pathname === "/login") return null;
 
   return (
     <header className="sticky top-0 z-30 border-b-2 border-ink bg-paper/90 backdrop-blur">
@@ -47,6 +51,18 @@ export default function Nav() {
             );
           })}
         </div>
+        {player && (
+          <Link
+            href="/profile"
+            title="Your profile"
+            className={`ml-2 flex shrink-0 items-center gap-2 border-2 px-1 py-1 transition-colors sm:pr-3 ${
+              pathname === "/profile" ? "border-red" : "border-ink hover:border-red"
+            }`}
+          >
+            <Avatar name={player.name} url={profile?.avatarUrl} size={26} />
+            <span className="hidden font-mono text-xs font-bold uppercase sm:block">{player.name}</span>
+          </Link>
+        )}
       </nav>
     </header>
   );

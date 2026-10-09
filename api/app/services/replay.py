@@ -58,6 +58,23 @@ def _session_window(session, t0, t_start, t_end):
     return start, end
 
 
+def _outline_from_positions(session) -> pd.DataFrame:
+    """Track outline from one lap's worth of raw position samples, for sessions where no
+    lap's telemetry can be sliced (position feed misaligned with the lap timing)."""
+    lap_s = session.laps["LapTime"].dropna().median().total_seconds()
+    for df in session.pos_data.values():
+        df = df[(df["X"] != 0) | (df["Y"] != 0)]
+        moving = df[df["Status"] == "OnTrack"] if "Status" in df.columns else df
+        if len(moving) < 100:
+            continue
+        mid = moving["Date"].iloc[len(moving) // 2]
+        window = moving[(moving["Date"] >= mid)
+                        & (moving["Date"] <= mid + pd.Timedelta(seconds=lap_s))]
+        if len(window) > 50:
+            return window[["X", "Y"]]
+    raise ValueError("no position data to draw the track outline")
+
+
 def find_last_completed(season: int = SEASON) -> dict | None:
     """Most recent completed session, preferring the race of the latest past round."""
     from .schedule import get_next_session
@@ -65,12 +82,15 @@ def find_last_completed(season: int = SEASON) -> dict | None:
     last = info.get("lastCompleted")
     if not last:
         return None
-    return {"year": season, "round": last["round"], "session": last["session"],
+    from .results import SESSION_CODES
+    return {"year": season, "round": last["round"],
+            "session": SESSION_CODES.get(last["session"], last["session"]),
             "event": last["event"]}
 
 
 def build_replay(year: int, round_: int, ses: str) -> dict:
-    session = fastf1.get_session(year, round_, ses)
+    from .results import CODE_NAMES
+    session = fastf1.get_session(year, round_, CODE_NAMES.get(ses, ses))
     session.load(telemetry=True, weather=False, messages=True)
     t0 = session.t0_date  # absolute datetime for session t=0
 
@@ -93,11 +113,13 @@ def build_replay(year: int, round_: int, ses: str) -> dict:
     try:
         circuit_info = session.get_circuit_info()
         rotation = circuit_info.rotation if circuit_info else 0.0
-    except (AttributeError, ValueError):
+    except (AttributeError, ValueError, KeyError):
         log.warning("no circuit info for %s — track map not rotated", session.event["EventName"])
         rotation = 0.0
-    fl = session.laps.pick_fastest()
-    tel = fl.get_telemetry()
+    from .telemetry import fastest_with_telemetry
+    _, tel = fastest_with_telemetry(session.laps)
+    if tel is None:
+        tel = _outline_from_positions(session)
     if len(tel) > 700:
         tel = tel.iloc[np.linspace(0, len(tel) - 1, 700).astype(int)]
     tx, ty = _rotate(tel["X"].to_numpy(), tel["Y"].to_numpy(), rotation)
@@ -221,7 +243,7 @@ def build_replay(year: int, round_: int, ses: str) -> dict:
     events.sort(key=lambda e: e["t"])
 
     return {
-        "meta": {"year": year, "round": round_, "session": ses,
+        "meta": {"year": year, "round": round_, "session": session.name, "code": ses,
                  "event": session.event["EventName"],
                  "drivers": list(meta.values())},
         "track": track,
@@ -234,5 +256,6 @@ def build_replay(year: int, round_: int, ses: str) -> dict:
 
 
 def get_replay(year: int, round_: int, ses: str) -> dict:
+    """`ses` is a session code (FP1 … R)."""
     key = f"replay_{year}_{round_}_{ses}"
     return jsoncache.get_or_build(key, None, lambda: build_replay(year, round_, ses))

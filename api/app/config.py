@@ -33,6 +33,14 @@ DATABASE_URL = os.environ.get("DATABASE_URL") or f"sqlite:///{DATA_DIR / 'predic
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 
+# Precomputed data CDN (Supabase Storage, public bucket). `python -m app.publish` fills it;
+# the web app reads it directly and the API falls back to it before rebuilding anything.
+STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", "pitwall")
+DATA_PREFIX = "v1"
+DATA_PUBLIC_URL = (f"{SUPABASE_URL}/storage/v1/object/public/{STORAGE_BUCKET}/{DATA_PREFIX}"
+                   if SUPABASE_URL else "")
+SUPABASE_SECRET_KEY = os.environ.get("SUPABASE_SECRET_KEY", "")  # publisher only
+
 # Current season; override via env if needed
 SEASON = int(os.environ.get("F1_SEASON", "2026"))
 
@@ -47,10 +55,20 @@ NEWS_FEEDS = [
     ("Motorsport.com", "https://www.motorsport.com/rss/f1/news/"),
     ("RacingNews365", "https://racingnews365.com/feed/news.xml"),
 ]
-TEAM_NEWS_KEYWORDS = {
-    "ferrari": ["ferrari", "leclerc", "hamilton", "scuderia"],
-    "mercedes": ["mercedes", "russell", "antonelli", "toto wolff"],
-}
+# 2026 teams: id (Jolpica constructorId), display name, news keywords (team + drivers + boss)
+TEAMS = [
+    ("mercedes", "Mercedes", ["mercedes", "russell", "antonelli", "toto wolff"]),
+    ("ferrari", "Ferrari", ["ferrari", "scuderia", "leclerc", "hamilton", "vasseur"]),
+    ("mclaren", "McLaren", ["mclaren", "norris", "piastri", "andrea stella", "zak brown"]),
+    ("red_bull", "Red Bull", ["red bull", "verstappen", "hadjar", "mekies"]),
+    ("rb", "Racing Bulls", ["racing bulls", "lawson", "lindblad", "tsunoda"]),
+    ("alpine", "Alpine", ["alpine", "gasly", "colapinto", "briatore"]),
+    ("haas", "Haas", ["haas", "bearman", "ocon", "komatsu"]),
+    ("audi", "Audi", ["audi", "sauber", "bortoleto", "hulkenberg", "hülkenberg"]),
+    ("williams", "Williams", ["williams", "sainz", "albon", "vowles"]),
+    ("aston_martin", "Aston Martin", ["aston martin", "alonso", "stroll", "newey"]),
+    ("cadillac", "Cadillac", ["cadillac", "bottas", "perez", "pérez"]),
+]
 NEWS_CACHE_TTL = 15 * 60  # 15 minutes
 
 # Cache TTLs (seconds)

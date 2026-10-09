@@ -12,6 +12,8 @@ import {
 } from "@/components/Standings";
 import { NewsList, NewsTicker, type NewsItem } from "@/components/News";
 import TrackPath from "@/components/TrackPath";
+import { useAuth } from "@/lib/auth";
+import { nextSession, type Schedule } from "@/lib/sessions";
 
 type Standings = {
   season: number;
@@ -23,19 +25,8 @@ type Grid = {
   season: number;
   teams: { team: string; teamColor: string; points: number; drivers: DriverStanding[] }[];
 };
-type News = { top: NewsItem[]; ferrari: NewsItem[]; mercedes: NewsItem[] };
-type NextSession = {
-  next: {
-    event: string;
-    session: string;
-    dateUtc: string;
-    location: string;
-    country: string;
-    round: number;
-  } | null;
-  live: { event: string; session: string } | null;
-};
-
+type News = { top: NewsItem[]; teams: Record<string, NewsItem[]> };
+type Team = { id: string; name: string; color: string };
 function greeting(): string {
   const h = new Date().getHours();
   if (h < 5) return "Burning the midnight oil";
@@ -76,7 +67,14 @@ export default function Home() {
   const { data: standings, error: stErr } = useApi<Standings>("/api/standings", 30 * 60_000);
   const { data: grid } = useApi<Grid>("/api/drivers", 60 * 60_000);
   const { data: news, error: newsErr } = useApi<News>("/api/news", 15 * 60_000);
-  const { data: next } = useApi<NextSession>("/api/schedule/next", 5 * 60_000);
+  // computed client-side from the (CDN-cached) schedule: no API round-trip, no cold start
+  const { data: schedule } = useApi<Schedule>("/api/schedule", 60 * 60_000);
+  const next = schedule ? nextSession(schedule) : null;
+  const { data: teams } = useApi<Team[]>("/api/teams");
+  const { player, profile } = useAuth();
+  const newsTeams = (profile?.newsTeams ?? [])
+    .map((id) => teams?.find((t) => t.id === id))
+    .filter((t): t is Team => !!t);
 
   const heroCircuit = next?.next ? EVENT_CIRCUIT[next.next.event] : undefined;
 
@@ -99,7 +97,7 @@ export default function Home() {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.1 }}
               >
-                {greeting()}, Harsh
+                {greeting()}{player ? `, ${player.name}` : ""}
               </motion.p>
               <motion.h1
                 className="display mt-1 text-5xl font-black uppercase leading-[0.95] sm:text-7xl"
@@ -238,28 +236,32 @@ export default function Home() {
       </Section>
 
       {/* ===================================================== team news */}
-      <Section title="Team Radio" subtitle="Ferrari · Mercedes focus">
-        <div className="grid gap-5 lg:grid-cols-2">
-          <div>
-            <h3
-              className="mb-2 inline-block px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-white"
-              style={{ background: "#E10600" }}
-            >
-              Scuderia Ferrari
-            </h3>
-            <NewsList items={news?.ferrari} accent="#E10600" compact />
+      {newsTeams.length > 0 ? (
+        <Section title="Team Radio" subtitle={newsTeams.map((t) => t.name).join(" · ")}>
+          <div className={`grid gap-5 ${newsTeams.length > 1 ? "lg:grid-cols-2" : ""}`}>
+            {newsTeams.map((t) => (
+              <div key={t.id}>
+                <h3
+                  className="mb-2 inline-block px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-white"
+                  style={{ background: t.color, textShadow: "0 1px 1px rgba(0,0,0,.35)" }}
+                >
+                  {t.name}
+                </h3>
+                <NewsList items={news?.teams?.[t.id]} accent={t.color} compact />
+              </div>
+            ))}
           </div>
-          <div>
-            <h3
-              className="mb-2 inline-block px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-ink"
-              style={{ background: "#27F4D2" }}
-            >
-              Mercedes-AMG
-            </h3>
-            <NewsList items={news?.mercedes} accent="#0FA894" compact />
-          </div>
-        </div>
-      </Section>
+        </Section>
+      ) : (
+        player && (
+          <p className="text-center text-sm text-muted">
+            Want news columns for your teams?{" "}
+            <Link href="/profile" className="font-bold text-red underline-offset-2 hover:underline">
+              Pick them in your profile →
+            </Link>
+          </p>
+        )
+      )}
     </div>
   );
 }

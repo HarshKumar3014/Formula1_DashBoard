@@ -2,7 +2,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { apiFetch } from "@/lib/api";
-import { authHeaders, useAuth, type Provider } from "@/lib/auth";
+import Link from "next/link";
+import { authHeaders, useAuth, type Player } from "@/lib/auth";
+import { badgesFor, tierFor } from "@/lib/tiers";
+import Avatar from "@/components/Avatar";
 import Section, { Card, Skeleton, ErrorNote } from "@/components/Section";
 import { SESSION_SHORT, sessionTime, type SessionCode } from "@/lib/sessions";
 
@@ -52,37 +55,8 @@ type BoardRow = {
   you: boolean;
 };
 type Board = { rows: BoardRow[] };
-type Player = { id: number; name: string };
 
 const PICKS = 10;
-
-/* ---------------------------------------------------------------- rewards */
-
-// Fake career ladder — season points unlock a title.
-const TIERS = [
-  { min: 0, name: "Rookie" },
-  { min: 40, name: "Midfielder" },
-  { min: 120, name: "Points Finisher" },
-  { min: 250, name: "Podium Regular" },
-  { min: 450, name: "Race Winner" },
-  { min: 750, name: "World Champion" },
-];
-
-function tierFor(points: number) {
-  let i = 0;
-  while (i + 1 < TIERS.length && points >= TIERS[i + 1].min) i++;
-  return { ...TIERS[i], next: TIERS[i + 1] ?? null };
-}
-
-function badgesFor(r: BoardRow) {
-  return [
-    { on: r.winners > 0, icon: "🎯", name: "Bullseye", hint: "Called a session winner" },
-    { on: r.podiums > 0, icon: "🔮", name: "Oracle", hint: "Perfect podium (P1–P3 exact)" },
-    { on: r.exact >= 25, icon: "🏹", name: "Sharpshooter", hint: "25 exact positions" },
-    { on: r.played >= 10, icon: "📅", name: "Ever-present", hint: "10 sessions predicted" },
-    { on: r.best >= 40, icon: "🔥", name: "Hot Lap", hint: "40+ points in one session" },
-  ];
-}
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -107,139 +81,37 @@ function status(s: GameSession) {
 
 /* ------------------------------------------------------------ player card */
 
-const PROVIDERS: { id: Provider; label: string; icon: React.ReactNode }[] = [
-  {
-    id: "google",
-    label: "Google",
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
-        <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.8-5.5 3.8-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3 14.7 2 12 2 6.5 2 2 6.5 2 12s4.5 10 10 10c5.8 0 9.6-4.1 9.6-9.8 0-.7-.1-1.2-.2-1.7H12z" />
-      </svg>
-    ),
-  },
-  {
-    id: "github",
-    label: "GitHub",
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
-        <path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z" />
-      </svg>
-    ),
-  },
-];
-
-function SignInCard({
-  configured,
-  onSignIn,
-}: {
-  configured: boolean;
-  onSignIn: (p: Provider) => void;
-}) {
+function SignInPrompt({ configured }: { configured: boolean }) {
   return (
     <Card className="p-4">
       <p className="display text-xl font-black uppercase">Join the grid</p>
-      <p className="mt-1 text-xs text-muted">
-        Sign in to save predictions and climb the leaderboard. Anyone can browse without an account.
-      </p>
       {configured ? (
-        <div className="mt-3 grid gap-2">
-          {PROVIDERS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => onSignIn(p.id)}
-              className="flex items-center justify-center gap-2.5 border border-ink bg-card py-2 text-sm font-bold transition-colors hover:bg-ink hover:text-white"
-            >
-              {p.icon}
-              Continue with {p.label}
-            </button>
-          ))}
-        </div>
+        <>
+          <p className="mt-1 text-xs text-muted">Sign in to save predictions and climb the leaderboard.</p>
+          <Link
+            href="/login?next=/predict"
+            className="mt-3 block bg-red py-2 text-center text-sm font-bold uppercase text-white"
+          >
+            Sign in
+          </Link>
+        </>
       ) : (
-        <p className="mt-3 border-l-4 border-red bg-paper px-3 py-2 text-xs">
-          Sign-in isn&apos;t configured yet — set <code>NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
-          <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>.
+        <p className="mt-2 border-l-4 border-red bg-paper px-3 py-2 text-xs">
+          Sign-in isn&apos;t configured on this server, so predictions can&apos;t be saved.
         </p>
       )}
     </Card>
   );
 }
 
-function NameCard({
-  token,
-  email,
-  onJoined,
-  onSignOut,
-}: {
-  token: string;
-  email: string | undefined;
-  onJoined: (p: Player) => void;
-  onSignOut: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setErr(null);
-    try {
-      onJoined(
-        await apiFetch<Player>("/api/predict/join", {
-          method: "POST",
-          headers: { "content-type": "application/json", ...authHeaders(token) },
-          body: JSON.stringify({ name }),
-        }),
-      );
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Card className="p-4">
-      <p className="display text-xl font-black uppercase">Pick your racing name</p>
-      <p className="mt-1 text-xs text-muted">
-        Shown on the leaderboard instead of {email ?? "your account"}. You choose it once.
-      </p>
-      <form onSubmit={submit} className="mt-3 flex gap-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={20}
-          placeholder="e.g. BoxBoxBox"
-          className="min-w-0 flex-1 border border-line bg-paper px-2.5 py-2 text-sm outline-none focus:border-ink"
-        />
-        <button
-          disabled={busy || name.trim().length < 3}
-          className="bg-red px-4 text-sm font-bold uppercase text-white disabled:opacity-40"
-        >
-          {busy ? "…" : "Go"}
-        </button>
-      </form>
-      {err && <p className="mt-2 text-xs font-semibold text-red">{err}</p>}
-      <button
-        onClick={onSignOut}
-        className="mt-3 text-[11px] font-bold uppercase tracking-wide text-muted hover:text-red"
-      >
-        Sign out
-      </button>
-    </Card>
-  );
-}
-
 function PlayerCard({
   player,
-  email,
+  avatarUrl,
   row,
-  onSignOut,
 }: {
   player: Player;
-  email: string | undefined;
+  avatarUrl: string | null | undefined;
   row: BoardRow | null;
-  onSignOut: () => void;
 }) {
   const points = row?.points ?? 0;
   const tier = tierFor(points);
@@ -249,7 +121,10 @@ function PlayerCard({
     <Card className="overflow-hidden">
       <div className="bg-ink px-4 py-3 text-white">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="display truncate text-2xl font-black uppercase">{player.name}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <Avatar name={player.name} url={avatarUrl} size={26} />
+            <span className="display truncate text-2xl font-black uppercase">{player.name}</span>
+          </span>
           <span className="font-mono text-xs text-white/60">{row ? `P${row.rank}` : "unranked"}</span>
         </div>
         <div className="mt-1 flex items-baseline justify-between">
@@ -295,15 +170,12 @@ function PlayerCard({
               </span>
             ))}
         </div>
-        <div className="flex items-center justify-between gap-2 border-t border-line pt-3 text-xs">
-          <span className="truncate text-muted">{email}</span>
-          <button
-            onClick={onSignOut}
-            className="shrink-0 font-bold uppercase tracking-wide text-muted hover:text-red"
-          >
-            Sign out
-          </button>
-        </div>
+        <Link
+          href="/profile"
+          className="block border-t border-line pt-3 text-xs font-bold uppercase tracking-wide text-muted hover:text-ink"
+        >
+          Your profile →
+        </Link>
       </div>
     </Card>
   );
@@ -716,10 +588,10 @@ function Leaderboard({
               {r.rank}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-semibold">
+              <Link href={`/u/${encodeURIComponent(r.name)}`} className="block truncate font-semibold hover:text-red">
                 {r.name}
                 {r.you && <span className="ml-1.5 text-[10px] font-bold uppercase text-red">you</span>}
-              </span>
+              </Link>
               <span className="block text-[10px] uppercase tracking-wider text-muted">
                 {tierFor(r.points).name} · {r.exact} exact
                 {r.pending > 0 && ` · ${r.pending} pending`}
@@ -737,13 +609,8 @@ function Leaderboard({
 
 export default function PredictPage() {
   const auth = useAuth();
-  const { token } = auth;
-  // player lookups are tagged with the token they were made for, so a sign-out or account
-  // switch never shows the previous user's player
-  const [known, setKnown] = useState<{ token: string; player: Player | null } | null>(null);
-  const playerKnown = !!token && known?.token === token;
-  const player = playerKnown ? known!.player : null;
-  const gameToken = player ? token : null;
+  const { player } = auth;
+  const gameToken = player ? auth.token : null;
   const [round, setRound] = useState<number | null>(null);
   const [event, setEvent] = useState<GameEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -757,17 +624,6 @@ export default function PredictPage() {
     const id = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    apiFetch<{ player: Player | null }>("/api/predict/me", { headers: authHeaders(token) })
-      .then((r) => !cancelled && setKnown({ token, player: r.player }))
-      .catch(() => !cancelled && setKnown({ token, player: null }));
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
 
   useEffect(() => {
     if (!auth.ready) return;
@@ -797,7 +653,6 @@ export default function PredictPage() {
     event?.sessions.at(-1) ??
     null;
 
-  const email = auth.session?.user.email;
 
   return (
     <div className="space-y-6">
@@ -927,22 +782,12 @@ export default function PredictPage() {
             {/* sidebar */}
             <div className="space-y-4">
               <div className={joinNudge && !player ? "ring-2 ring-red ring-offset-2 ring-offset-paper" : ""}>
-                {!auth.ready || (token && !playerKnown) ? (
+                {player ? (
+                  <PlayerCard player={player} avatarUrl={auth.profile?.avatarUrl} row={myRow} />
+                ) : player === undefined ? (
                   <Skeleton className="h-40" />
-                ) : !token ? (
-                  <SignInCard configured={auth.configured} onSignIn={auth.signIn} />
-                ) : player ? (
-                  <PlayerCard player={player} email={email} row={myRow} onSignOut={auth.signOut} />
                 ) : (
-                  <NameCard
-                    token={token}
-                    email={email}
-                    onJoined={(p) => {
-                      setKnown({ token, player: p });
-                      setJoinNudge(false);
-                    }}
-                    onSignOut={auth.signOut}
-                  />
+                  <SignInPrompt configured={auth.configured} />
                 )}
               </div>
                             <Leaderboard token={gameToken} round={event.round} refreshKey={refreshKey} />

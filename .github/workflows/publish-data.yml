@@ -1,0 +1,42 @@
+# Precomputes the dashboard's data and uploads it to the Supabase Storage CDN.
+# Hourly: refreshes schedule/standings/news and builds results, telemetry and replays for
+# sessions that finished since the last run (each session is built once).
+name: Publish data
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      args:
+        description: "Extra args, e.g. --rebuild 16/R or --only telemetry"
+        required: false
+        default: ""
+
+concurrency:
+  group: publish-data
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: api/requirements.txt
+
+      - run: pip install -r api/requirements.txt
+
+      - name: Build and upload
+        working-directory: api
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          F1_DATA_DIR: ${{ github.workspace }}/data
+          ARGS: ${{ inputs.args }}  # via env, never spliced into the script
+        run: python -m app.publish $ARGS

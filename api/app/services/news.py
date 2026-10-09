@@ -1,4 +1,5 @@
-"""F1 news via public RSS feeds. Keyword-filtered per-team columns, deduped, 15-min cache."""
+"""F1 news via public RSS feeds. Keyword-filtered per-team lists (users pick which to show),
+deduped, 15-min cache."""
 import calendar
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -6,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import feedparser
 
 from .. import jsoncache
-from ..config import NEWS_FEEDS, NEWS_CACHE_TTL, TEAM_NEWS_KEYWORDS
+from ..config import NEWS_FEEDS, NEWS_CACHE_TTL, TEAMS
 
 log = logging.getLogger(__name__)
 
@@ -52,18 +53,17 @@ def build_news() -> dict:
         deduped.append(item)
     deduped.sort(key=lambda i: i["published"] or 0, reverse=True)
 
-    def team_filter(team: str) -> list[dict]:
-        kws = TEAM_NEWS_KEYWORDS[team]
+    def team_filter(kws: list[str]) -> list[dict]:
         return [i for i in deduped
                 if any(kw in (i["title"] + " " + i["summary"]).lower() for kw in kws)][:8]
 
     return {
         "top": deduped[:6],
-        "ferrari": team_filter("ferrari"),
-        "mercedes": team_filter("mercedes"),
+        "teams": {tid: team_filter(kws) for tid, _, kws in TEAMS},
         "count": len(deduped),
     }
 
 
 def get_news() -> dict:
-    return jsoncache.get_or_build("news", NEWS_CACHE_TTL, build_news)
+    # "news_v2": per-team lists for every team (v1 only had Ferrari/Mercedes columns)
+    return jsoncache.get_or_build("news_v2", NEWS_CACHE_TTL, build_news)

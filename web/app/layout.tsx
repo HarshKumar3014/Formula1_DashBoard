@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Saira_Condensed, Archivo, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import Nav from "@/components/Nav";
+import AuthGate from "@/components/AuthGate";
+import { AuthProvider } from "@/lib/auth";
 
 const saira = Saira_Condensed({
   variable: "--font-saira",
@@ -36,10 +38,12 @@ export default function RootLayout({
       className={`${saira.variable} ${archivo.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Nav />
-        <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 px-4 pb-20 pt-8 sm:px-6">
-          {children}
-        </main>
+        <AuthProvider>
+          <Nav />
+          <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 px-4 pb-20 pt-8 sm:px-6">
+            <AuthGate>{children}</AuthGate>
+          </main>
+        </AuthProvider>
         <footer className="relative z-10 border-t border-line bg-card py-5 text-center text-xs text-muted">
           Data: Fast-F1 · Jolpica-F1 · public RSS · circuit outlines by{" "}
           <a className="underline hover:text-ink" href="https://github.com/julesr0y/f1-circuits-svg">

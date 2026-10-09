@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { API_BASE, useApi } from "@/lib/api";
+import { apiFetch, useApi } from "@/lib/api";
 import { SESSION_SHORT, type Season, type SessionCode } from "@/lib/sessions";
 import { Card, Skeleton, ErrorNote } from "@/components/Section";
 import TrackMap, { type Track } from "@/components/TrackMap";
@@ -115,11 +115,7 @@ function ReplayView({ query }: { query: string }) {
   const lastTick = useRef(0);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/replay${query}`)
-      .then(async (r) => {
-        if (!r.ok) throw new Error((await r.json()).detail ?? r.statusText);
-        return r.json();
-      })
+    apiFetch<Replay>(`/api/replay${query}`)
       .then(setReplay)
       .catch((e) => setError(String(e.message ?? e)));
   }, [query]);
@@ -409,12 +405,24 @@ function ReplayPageInner() {
   const params = useSearchParams();
   const round = Number(params.get("round")) || null;
   const ses = (params.get("session")?.toUpperCase() as SessionCode | undefined) ?? null;
-  const query = round && ses ? `?round=${round}&session=${ses}` : "";
+  // no session picked → the latest completed one, resolved from the (CDN) season index
+  const { data: season, error } = useApi<Season>(round && ses ? null : "/api/results");
+  const latest = season?.events
+    .flatMap((e) => e.sessions.filter((s) => s.complete).map((s) => ({ round: e.round, code: s.code })))
+    .at(-1);
+  const query =
+    round && ses
+      ? `?round=${round}&session=${ses}`
+      : latest
+        ? `?round=${latest.round}&session=${latest.code}`
+        : season || error
+          ? "" // nothing indexed → let the API pick
+          : null;
 
   return (
     <div className="space-y-4">
-      <SessionPicker round={round} ses={ses} />
-      <ReplayView key={query} query={query} />
+      <SessionPicker round={round ?? latest?.round ?? null} ses={ses ?? latest?.code ?? null} />
+      {query === null ? <Skeleton className="h-96" /> : <ReplayView key={query} query={query} />}
     </div>
   );
 }

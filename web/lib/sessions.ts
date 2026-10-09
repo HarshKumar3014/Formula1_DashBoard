@@ -42,3 +42,44 @@ export function sessionTime(iso: string): string {
     minute: "2-digit",
   });
 }
+
+type ScheduleSession = { name: string; dateUtc: string };
+type ScheduleEvent = {
+  round: number;
+  name: string;
+  country: string;
+  location: string;
+  sessions: ScheduleSession[];
+};
+export type Schedule = { season: number; events: ScheduleEvent[] };
+export type SessionRef = {
+  event: string;
+  round: number;
+  session: string;
+  dateUtc: string;
+  country: string;
+  location: string;
+};
+
+/** Next upcoming session, plus one that is probably running now (started < 3h ago). */
+export function nextSession(schedule: Schedule, now = Date.now()) {
+  let next: SessionRef | null = null;
+  let live: SessionRef | null = null;
+  for (const ev of schedule.events) {
+    for (const s of ev.sessions) {
+      const start = new Date(s.dateUtc).getTime();
+      const ref = {
+        event: ev.name,
+        round: ev.round,
+        session: s.name,
+        dateUtc: s.dateUtc,
+        country: ev.country,
+        location: ev.location,
+      };
+      if (start <= now && now - start < 3 * 3600_000) live = ref;
+      if (start > now && !next) next = ref;
+    }
+    if (next) break;
+  }
+  return { next, live };
+}

@@ -15,6 +15,18 @@ players = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+# one row per player, created on first save; everything optional
+profiles = Table(
+    "profiles", metadata,
+    Column("player_id", Integer, ForeignKey("players.id", ondelete="CASCADE"), primary_key=True),
+    Column("avatar_url", String(512)),           # from the OAuth provider
+    Column("news_teams", JSON, nullable=False),  # team ids; [] = general news only
+    Column("fav_drivers", JSON, nullable=False), # driver codes
+    Column("fav_teams", JSON, nullable=False),   # team ids
+    Column("fav_track", String(64)),             # Jolpica circuitId
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 predictions = Table(
     "predictions", metadata,
     Column("id", Integer, primary_key=True),

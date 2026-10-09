@@ -8,7 +8,60 @@ export const API_BASE = (
 
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
+export const SEASON = Number(process.env.NEXT_PUBLIC_F1_SEASON ?? 2026);
+
+/**
+ * Precomputed data on the Supabase Storage CDN (filled by the API's `app.publish` job).
+ * Reads go there first: instant, and independent of the API host being awake.
+ */
+export const DATA_BASE =
+  process.env.NEXT_PUBLIC_DATA_URL?.replace(/\/+$/, "") ||
+  (process.env.NEXT_PUBLIC_SUPABASE_URL
+    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/+$/, "")}/storage/v1/object/public/pitwall/v1`
+    : null);
+
+/** API GET path → CDN key, for everything the publisher uploads. */
+function cdnKey(path: string): string | null {
+  const [p, qs = ""] = path.split("?");
+  const q = new URLSearchParams(qs);
+  const fixed: Record<string, string> = {
+    "/api/standings": `standings_${SEASON}`,
+    "/api/drivers": `grid_${SEASON}`,
+    "/api/news": "news_v2",
+    "/api/schedule": `schedule_${SEASON}`,
+    "/api/circuits": `circuit_stats_${SEASON}`,
+    "/api/records": "records",
+    "/api/results": `season_${SEASON}`,
+  };
+  if (fixed[p] && !qs) return fixed[p];
+  let m = p.match(/^\/api\/results\/(\d+)\/(\w+)$/);
+  if (m) return `results_${SEASON}_${m[1]}_${m[2].toUpperCase()}`;
+  m = p.match(/^\/api\/telemetry\/(\d+)\/(\d+)\/(\w+)\/bundle$/);
+  if (m) return `telemetry_${m[1]}_${m[2]}_${m[3].toUpperCase()}`;
+  if (p === "/api/telemetry/options" && Number(q.get("year") ?? SEASON) === SEASON)
+    return `telemetry_options_${SEASON}`;
+  if (p === "/api/replay" && q.get("round") && q.get("session"))
+    return `replay_${SEASON}_${q.get("round")}_${q.get("session")!.toUpperCase()}`;
+  return null;
+}
+
+async function fromCdn<T>(path: string): Promise<T | null> {
+  const key = DATA_BASE && cdnKey(path);
+  if (!key) return null;
+  try {
+    const res = await fetch(`${DATA_BASE}/${key}.json`);
+    return res.ok ? ((await res.json()) as T) : null;
+  } catch {
+    return null; // fall back to the API
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // plain GETs of published data come from the CDN; anything personal goes to the API
+  if (!init) {
+    const cached = await fromCdn<T>(path);
+    if (cached !== null) return cached;
+  }
   const res = await fetch(`${API_BASE}${path}`, init);
   if (!res.ok) {
     let detail = res.statusText;

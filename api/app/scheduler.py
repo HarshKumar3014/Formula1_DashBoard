@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 def _refresh_news():
     from . import jsoncache
     from .services import news
-    jsoncache.set("news", news.build_news())
+    jsoncache.set("news_v2", news.build_news())
     log.info("news refreshed")
 
 
