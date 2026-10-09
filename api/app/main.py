@@ -19,7 +19,11 @@ log = logging.getLogger("f1api")
 async def lifespan(app: FastAPI):
     config.ensure_dirs()
     fastf1.Cache.enable_cache(str(config.FF1_CACHE_DIR))
-    db.init()
+    try:
+        db.init()
+    except Exception:
+        # a bad DATABASE_URL should cost the prediction game, not the whole dashboard
+        log.exception("database unavailable — predictions/profiles will fail until it's fixed")
     scheduler = create_scheduler()
     scheduler.start()
     # first boot: build circuit/records aggregates in the background if missing
